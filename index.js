@@ -14,6 +14,7 @@ module.exports = function (content) {
     var pathSep = options.pathSep || '/';
     var resource = this.resource;
     var pathSepRegex = new RegExp(escapeRegExp(path.sep), 'g');
+    var appElement = options.appElement || 'body';
 
     // if a unix path starts with // we treat is as an absolute path e.g. //Users/wearymonkey
     // if we're on windows, then we ignore the / prefix as windows absolute paths are unique anyway e.g. C:\Users\wearymonkey
@@ -53,11 +54,36 @@ module.exports = function (content) {
         html = content;
     }
 
-    return "var path = '"+jsesc(filePath)+"';\n" +
-        "var html = " + html + ";\n" +
-        (requireAngular ? "var angular = require('angular');\n" : "window.") +
-        "angular.module('" + ngModule + "').run(['$templateCache', function(c) { c.put(path, html) }]);\n" +
-        "module.exports = path;";
+    return `var path = '${jsesc(filePath)}';
+        var html = ${html};
+        var angularRef = ${requireAngular ? "require('angular');\n" : "window.angular"};
+        var defaultReload = function() {
+          angularRef.module('${ngModule}').run(['$templateCache', function(c) { c.put(path, html) }]);
+        };
+        
+        if(module.hot) {
+            var appElement = document.querySelector('${appElement}');
+            var ngElement = angularRef.element(appElement);
+            var injector = ngElement.data() ? ngElement.data().$injector : null;
+            if(injector) {
+                var templateCache = injector.get('$templateCache');
+                var templateInCache = templateCache.get(path);
+                templateCache.put(path, html);
+                
+                if(templateInCache) {
+                    console.log('Found template', path, 'in $templateCache, reloading route');
+                    injector.get('$route').reload();
+                }
+            } else {
+                defaultReload();
+            }
+            
+            module.hot.accept();
+        } else {
+          defaultReload();
+        }
+
+        module.exports = path;`;
 
     function getAndInterpolateOption(optionKey, def) {
         return options[optionKey]
